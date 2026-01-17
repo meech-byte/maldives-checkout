@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Verify code</title>
+<style>
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:#f6f6f6;color:#222;}
+  .wrap{width:min(440px, calc(100% - 32px));margin:28px auto;background:#fff;border-radius:16px;padding:26px;box-shadow:0 8px 24px rgba(0,0,0,.08);}
+  h1{margin:0 0 6px;font-size:22px;font-weight:750;color:#7b2cbf;letter-spacing:-.2px;}
+  .sub{margin:0 0 18px;font-size:14px;color:#666;line-height:1.35;}
+  .code-row{display:flex;gap:10px;justify-content:space-between;margin:14px 0 10px;}
+  .code-row input{width:100%;max-width:54px;padding:14px 0;text-align:center;font-size:18px;border-radius:12px;border:2px solid #e2c9f3;outline:none;}
+  .code-row input:focus{border-color:#caa3ea;}
+  button{
+    margin-top:14px;
+    width:100%;
+    padding:16px;
+    border:none;
+    border-radius:14px;
+    background:#e6d6f3;
+    color:#5a4a6a;
+    font-size:16px;
+    font-weight:650;
+    cursor:pointer;
+  }
+  button.enabled{
+    background:#7b2cbf;
+    color:#fff;
+  }
+  button:disabled{
+    cursor:not-allowed;
+    opacity:1;
+  }
+  button:disabled:hover{background:#e6d6f3;}
+  button.enabled:hover{background:#7b2cbf;}
+  .meta{margin-top:12px;font-size:12px;color:#777;line-height:1.35;display:flex;justify-content:space-between;gap:10px;}
+  .link{color:#7b2cbf;text-decoration:none;font-weight:650;cursor:pointer;user-select:none;white-space:nowrap;}
+  .link.active{
+    color:#7b2cbf;
+  }
+  .error{margin-top:10px;font-size:13px;color:#b00020;min-height:18px;}
+
+/* otp paste polish */
+#codes input, .otp input{ -webkit-user-select:text; user-select:text; }
+</style>
+<style>
+/* soften page appearing abruptly */
+html.page-fade-in body{ opacity:0; }
+html.page-fade-in body{ animation: otpPageFade 260ms ease-out forwards; }
+@keyframes otpPageFade{ from{opacity:0;} to{opacity:1;} }
+</style>
+<style>
+/* force: keep OTP digits centered, ONLY change verified text alignment */
+.code-row input, #codes input { text-align:center !important; }
+#inlineVerified { text-align:left !important; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Verify it’s you</h1>
+    <p class="sub" id="msg">Enter the 6-digit code sent to your phone.</p>
+
+    <div class="code-row" id="codes">
+      <input type="tel" inputmode="numeric" autocomplete="one-time-code" / maxlength="6">
+      <input type="tel" inputmode="numeric" autocomplete="one-time-code" / maxlength="6">
+      <input type="tel" inputmode="numeric" autocomplete="one-time-code" / maxlength="6">
+      <input type="tel" inputmode="numeric" autocomplete="one-time-code" / maxlength="6">
+      <input type="tel" inputmode="numeric" autocomplete="one-time-code" / maxlength="6">
+      <input type="tel" inputmode="numeric" autocomplete="one-time-code" / maxlength="6">
+    </div>
+<div class="error" id="err"></div>
+    <div class="error" id="info" style="color:#2e7d32;"></div>
+    <button id="verifyBtn" type="button">Verify</button>
+
+    <div class="meta">
+      <div id="timer">Resend code in 30s</div>
+      <div class="link" id="resend" style="opacity:.5; pointer-events:none;">Resend</div>
+    </div>
+  </div>
+
+<script>
+(function(){
+  const inputs = Array.from(document.querySelectorAll('#codes input, .otp input')).slice(0,6);
+  const verifyBtn = document.getElementById('verifyBtn');
+  const resendEl = document.getElementById('resend');
+  const timerEl  = document.getElementById('timer');
+
+  // timings (ms)
+  const VERIFYING_MS = 2600; // previous ~1100ms; +1500ms => 2600ms
+  const TO_SUCCESS_MS = 3000;
+
+  function digitsOnly(s){ return String(s||'').replace(/\D/g,''); }
+  function codeValue(){ return inputs.map(i => (i.value||'')).join(''); }
+  function isComplete(){ return /^\d{6}$/.test(codeValue()); }
+
+  function focusIndex(i){
+    if(i < 0) i = 0;
+    if(i > inputs.length-1) i = inputs.length-1;
+    inputs[i].focus();
+    try{ inputs[i].select(); }catch(e){}
+  }
+
+  function setVerifyState(){
+    const ready = isComplete();
+    if(verifyBtn){
+      verifyBtn.disabled = !ready;
+      verifyBtn.classList.toggle('enabled', ready);
+      verifyBtn.style.opacity = ready ? '1' : '0.7';
+      verifyBtn.style.cursor = ready ? 'pointer' : 'not-allowed';
+    }
+  }
+
+  function fillFromStart(text){
+    const d = digitsOnly(text).slice(0, inputs.length);
+    for(let i=0;i<inputs.length;i++){
+      inputs[i].value = d[i] ? d[i] : '';
+    }
+    setVerifyState();
+    if(isComplete()) focusIndex(inputs.length-1);
+    else {
+      const next = inputs.findIndex(x => !x.value);
+      focusIndex(next === -1 ? inputs.length-1 : next);
+    }
+  }
+
+  // Inline "verified." message placement: between boxes and button.
+  function ensureInlineVerified(){
+    let el = document.getElementById('inlineVerified');
+    if(el) return el;
+
+    // Prefer placing right before verify button
+    if(!verifyBtn) return null;
+
+    el = document.createElement('div');
+    el.id = 'inlineVerified';
+    el.style.cssText = [
+      'display:none',
+      'margin:10px 0 8px 0',
+      'text-align:left',
+      'font-size:14px',
+      'font-weight:400',
+      'color:#16a34a'
+    ].join(';');
+    el.textContent = 'verified.';
+
+    verifyBtn.parentNode.insertBefore(el, verifyBtn);
+    return el;
+  }
+
+  function showInlineVerified(){
+    const el = ensureInlineVerified();
+    if(el) el.style.display = 'block';
+  }
+  function hideInlineVerified(){
+    const el = document.getElementById('inlineVerified');
+    if(el) el.style.display = 'none';
+  }
+
+  // Overlay: centered spinner + "verifying" + dots
+  let dotsTimer = null;
+  function ensureOverlay(){
+    let ov = document.getElementById('otpOverlayMinimal');
+    if(ov) return ov;
+
+    ov = document.createElement('div');
+    ov.id = 'otpOverlayMinimal';
+    ov.style.cssText = [
+      'position:fixed','inset:0','display:none','align-items:center','justify-content:center',
+      'background:rgba(15,23,42,0.18)','backdrop-filter:blur(4px)',
+      'z-index:999999','opacity:0','transition:opacity 180ms ease-out'
+    ].join(';');
+
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;';
+
+    const spin = document.createElement('div');
+    spin.id = 'otpSpin';
+    spin.style.cssText = [
+      'width:34px','height:34px','border-radius:999px',
+      'border:3px solid rgba(255,255,255,0.42)',
+      'border-top-color:#6d28d9',
+      'animation:otpSpin .8s linear infinite'
+    ].join(';');
+
+    const msg = document.createElement('div');
+    msg.id = 'otpMsg';
+    msg.style.cssText = 'font-weight:800;font-size:14px;color:#111827;text-align:center;';
+    msg.textContent = 'verifying';
+
+    const sub = document.createElement('div');
+    sub.id = 'otpSub';
+    sub.style.cssText = 'font-weight:700;font-size:12px;color:rgba(17,24,39,0.75);text-align:center;';
+    sub.textContent = '';
+
+    const style = document.createElement('style');
+    style.textContent = '@keyframes otpSpin{to{transform:rotate(360deg)}}';
+
+    wrap.appendChild(spin);
+    wrap.appendChild(msg);
+    wrap.appendChild(sub);
+    ov.appendChild(wrap);
+    document.body.appendChild(ov);
+    document.head.appendChild(style);
+    return ov;
+  }
+
+  function stopDots(){
+    if(dotsTimer){ clearInterval(dotsTimer); dotsTimer = null; }
+  }
+  function startDots(){
+    const sub = document.getElementById('otpSub');
+    let k = 0;
+    stopDots();
+    dotsTimer = setInterval(()=>{
+      k = (k + 1) % 4;
+      const dots = '.'.repeat(k);
+      if(sub) sub.textContent = dots ? dots : '';
+    }, 350);
+  }
+
+  function showVerifying(){
+    hideInlineVerified();
+    const ov = ensureOverlay();
+    ov.style.display = 'flex';
+    requestAnimationFrame(()=>{ ov.style.opacity = '1'; });
+    startDots();
+  }
+
+  function hideOverlay(){
+    const ov = document.getElementById('otpOverlayMinimal');
+    if(!ov) return;
+    stopDots();
+    ov.style.opacity = '0';
+    setTimeout(()=>{ ov.style.display = 'none'; }, 200);
+  }
+
+  // Inputs behavior: lock at 6 digits (no restart)
+  inputs.forEach((inp, idx) => {
+    inp.type = 'text';
+    inp.setAttribute('inputmode','numeric');
+    inp.setAttribute('autocomplete','one-time-code');
+    inp.setAttribute('autocapitalize','off');
+    inp.setAttribute('spellcheck','false');
+    inp.maxLength = 1;
+
+    inp.addEventListener('keydown', (e) => {
+      if(isComplete() && e.key.length === 1 && /\d/.test(e.key)){
+        e.preventDefault();
+        return;
+      }
+      if(e.key === 'Backspace'){
+        if(!inp.value && idx > 0){
+          e.preventDefault();
+          focusIndex(idx-1);
+          return;
+        }
+      }
+      if(e.key.length === 1 && !/\d/.test(e.key)){
+        e.preventDefault();
+      }
+    }, true);
+
+    inp.addEventListener('input', () => {
+      if(isComplete()){
+        inp.value = digitsOnly(inp.value).slice(0,1);
+        setVerifyState();
+        return;
+      }
+      inp.value = digitsOnly(inp.value).slice(0,1);
+      if(inp.value && idx < inputs.length-1) focusIndex(idx+1);
+      setVerifyState();
+    }, true);
+
+    inp.addEventListener('paste', (e) => {
+      const text = (e.clipboardData || window.clipboardData).getData('text') || '';
+      const d = digitsOnly(text);
+      if(!d) return;
+      e.preventDefault();
+      if(isComplete()){
+        setVerifyState();
+        return;
+      }
+      fillFromStart(d);
+    }, true);
+  });
+
+  // Verify flow
+  if(verifyBtn){
+    try{ verifyBtn.type = 'button'; }catch(e){}
+    verifyBtn.addEventListener('click', (ev) => {
+      try{ ev.preventDefault(); ev.stopPropagation(); }catch(e){}
+      setVerifyState();
+      if(verifyBtn.disabled) return;
+
+      showVerifying(); // overlay spinner + verifying + dots
+      setTimeout(() => {
+        hideOverlay();   // remove dim overlay
+        showInlineVerified(); // show small verified. between boxes and button
+        setTimeout(() => {
+          window.location.href = 'success.html';
+        }, TO_SUCCESS_MS);
+      }, VERIFYING_MS);
+    }, true);
+  }
+
+  // resend countdown
+  let interval = null;
+  function setResendActive(active){
+    if(!resendEl) return;
+    resendEl.style.pointerEvents = active ? 'auto' : 'none';
+    resendEl.style.opacity = active ? '1' : '0.6';
+    resendEl.classList.toggle('active', active);
+  }
+  function startTimer(){
+    if(!timerEl || !resendEl) return;
+    if(interval) clearInterval(interval);
+    let t = 30;
+    setResendActive(false);
+    timerEl.textContent = 'Resend code in ' + t + 's';
+    interval = setInterval(() => {
+      t -= 1;
+      if(t <= 0){
+        clearInterval(interval);
+        interval = null;
+        timerEl.textContent = '';
+        setResendActive(true);
+        return;
+      }
+      timerEl.textContent = 'Resend code in ' + t + 's';
+    }, 1000);
+  }
+
+  if(resendEl){
+    resendEl.addEventListener('click', () => {
+      if(!resendEl.classList.contains('active')) return;
+      startTimer();
+    });
+  }
+
+  if(verifyBtn){ verifyBtn.disabled = true; }
+  startTimer();
+  setVerifyState();
+  if(inputs[0]) focusIndex(0);
+})();
+</script>
+
+<div id="processingOverlay" style="
+  position:fixed; inset:0; background:rgba(0,0,0,.35);
+  display:none; align-items:center; justify-content:center; z-index:9999;">
+  <div style="background:#fff; padding:18px 18px; border-radius:14px; width:min(340px, calc(100% - 48px));
+              text-align:center; box-shadow:0 12px 30px rgba(0,0,0,.2);">
+    <div style="width:34px;height:34px;border:4px solid #e6d6f3;border-top-color:#7b2cbf;border-radius:50%;
+                margin:4px auto 12px; animation:spin 0.9s linear infinite;"></div>
+    <div style="font-weight:750; color:#3a1b5a; margin-bottom:6px;">Verifying…</div>
+    <div style="font-size:13px; color:#666;">Please wait</div>
+  </div>
+</div>
+<style>@keyframes spin { to { transform: rotate(360deg); } }</style>
+
+<script>
+  // mark payment page to reset if user navigates back from OTP
+  function markReset(){
+    try{ sessionStorage.setItem("resetPayment", "true"); }catch(e){}
+  }
+  markReset();
+
+  // also mark on pagehide (covers bfcache / iOS quirks)
+  window.addEventListener("pagehide", markReset);
+
+  // if OTP page is restored from browser cache, reload to keep state consistent
+  window.addEventListener("pageshow", function (event) {
+    if (event.persisted) {
+      window.location.reload();
+    }
+  });
+</script>
+</body>
+</html>
